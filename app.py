@@ -56,9 +56,9 @@ def fetch_scraperapi(code, log):
     if not SCRAPER_API_KEY:
         log["scraperapi"] = "ANAHTAR BOS"
         return None, None
-    target = f"https://fvt.com.tr/fonlar/yatirim-fonlari/{code}"
+    target = f"https://fvt.com.tr/fonlar/yatirim-fonlari/{code}"    
     api = ("https://api.scraperapi.com?api_key=" + SCRAPER_API_KEY +
-           "&url=" + quote(target, safe="") + "&country_code=tr")
+           "&url=" + quote(target, safe="") + "&country_code=tr&premium=true")
     try:
         r = creq.get(api, timeout=90, headers={"Accept": "*/*"})
         log["scraperapi_status"] = r.status_code
