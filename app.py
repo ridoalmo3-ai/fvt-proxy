@@ -1,29 +1,21 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from curl_cffi import requests as creq
 from urllib.parse import quote
-from fastapi import Request
 import re, time
 
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ▼▼ ScraperAPI anahtarını tırnakların arasına yapıştır (yoksa boş bırak) ▼▼
 SCRAPER_API_KEY = "1967f7d39ff9d57ff2bcc1f3ed097fb7"
-# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 PROFILES = ["chrome", "chrome131", "chrome124", "chrome120", "safari17_0", "edge101"]
 cache = {}
-CACHE_SURE = 300  # 5 dakika — kotayı korur, dokunma
+CACHE_SURE = 300
 
-YARDIM = {"hata": "Adres bulunamadı", "dogru_kullanim": "/fund?code=TLY"}
+YARDIM = {"hata": "Adres bulunamadı", "dogru_kullanim": ["/fund?code=TLY", "/debug?code=TLY"]}
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -33,47 +25,66 @@ async def hata_yakala(request: Request, exc: StarletteHTTPException):
 
 @app.get("/")
 def health():
-    return {"status": "ok", "kullanim": "/fund?code=TLY"}
+    return {"status": "ok", "kullanim": "/fund?code=TLY", "debug": "/debug?code=TLY"}
 
 
-def fetch_direct(code):
-    """FVT'ye doğrudan istek — birden fazla Chrome kılığı dener"""
+def fetch_direct(code, log):
     url = f"https://fvt.com.tr/fonlar/yatirim-fonlari/{code}"
     try:
         s = creq.Session()
-        # Önce ana sayfayı ziyaret et: çerez alır, gerçek kullanıcı gibi görünür
         try:
-            s.get("https://fvt.com.tr/", impersonate="chrome", timeout=15,
-                  headers={"Accept-Language": "tr-TR,tr;q=0.9"})
-        except Exception:
-            pass
+            r0 = s.get("https://fvt.com.tr/", impersonate="chrome", timeout=15,
+                       headers={"Accept-Language": "tr-TR,tr;q=0.9"})
+            log["warmup"] = r0.status_code
+        except Exception as e:
+            log["warmup"] = f"hata: {e}"
         for p in PROFILES:
             try:
                 r = s.get(url, impersonate=p, timeout=20,
                           headers={"Accept-Language": "tr-TR,tr;q=0.9"})
+                log[f"direct:{p}"] = r.status_code
                 if r.status_code == 200 and ("fonKodu" in r.text or "Günün Tahmini" in r.text):
                     return r.text, f"direct:{p}"
-            except Exception:
-                continue
-    except Exception:
-        pass
+            except Exception as e:
+                log[f"direct:{p}"] = f"hata: {e}"
+    except Exception as e:
+        log["direct_genel"] = str(e)
     return None, None
 
 
-def fetch_scraperapi(code):
-    """Anahtar varsa: istek Türkiye'deki bir IP üzerinden gider"""
+def fetch_scraperapi(code, log):
     if not SCRAPER_API_KEY:
+        log["scraperapi"] = "ANAHTAR BOS"
         return None, None
     target = f"https://fvt.com.tr/fonlar/yatirim-fonlari/{code}"
     api = ("https://api.scraperapi.com?api_key=" + SCRAPER_API_KEY +
            "&url=" + quote(target, safe="") + "&country_code=tr")
     try:
-        r = creq.get(api, timeout=90, headers={"Accept": "text/html"})
+        r = creq.get(api, timeout=90, headers={"Accept": "*/*"})
+        log["scraperapi_status"] = r.status_code
+        log["scraperapi_uzunluk"] = len(r.text)
+        log["scraperapi_baslangic"] = r.text[:250]
         if r.status_code == 200 and ("fonKodu" in r.text or "Günün Tahmini" in r.text):
             return r.text, "scraperapi:tr"
-    except Exception:
-        pass
+    except Exception as e:
+        log["scraperapi_hata"] = str(e)
     return None, None
+
+
+@app.get("/debug")
+def debug(code: str = "TLY"):
+    code = code.upper().strip()
+    log = {"key_ilk6": SCRAPER_API_KEY[:6] + "..." if SCRAPER_API_KEY else "BOS"}
+    html, kaynak = fetch_direct(code, log)
+    if html:
+        log["SONUC"] = "BASARILI: " + kaynak
+        return JSONResponse(log)
+    html, kaynak = fetch_scraperapi(code, log)
+    if html:
+        log["SONUC"] = "BASARILI: " + kaynak
+        return JSONResponse(log)
+    log["SONUC"] = "BASARISIZ: detaylar yukarida"
+    return JSONResponse(log)
 
 
 @app.get("/fund")
@@ -93,19 +104,21 @@ def fund(code: str = ""):
         d["onbellek"] = True
         return JSONResponse(d)
 
-    html, kaynak = fetch_direct(code)          # 1. deneme: doğrudan (ücretsiz)
+    log = {}
+    html, kaynak = fetch_direct(code, log)
     if not html:
-        html, kaynak = fetch_scraperapi(code)  # 2. deneme: Türk IP'si ile
+        html, kaynak = fetch_scraperapi(code, log)
 
     if not html:
         return JSONResponse({
-            "error": "FVT tüm denemeleri engelledi. app.py'nin üstündeki "
-                     "SCRAPER_API_KEY alanına anahtar ekleyip tekrar dene."
+            "error": "Tüm denemeler başarısız",
+            "detay": log,
+            "ipucu": "Bu detayı aynen sohbete yapıştır",
         }, status_code=502)
 
     data = parse(html.replace('\\"', '"'), code) or parse(html, code)
     if not data:
-        return JSONResponse({"error": "Veri ayrıştırılamadı"}, status_code=502)
+        return JSONResponse({"error": "Veri ayrıştırılamadı", "detay": log}, status_code=502)
 
     data["kaynak"] = kaynak
     cache[code] = (now, data)
