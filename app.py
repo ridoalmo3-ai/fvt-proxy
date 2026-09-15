@@ -13,7 +13,7 @@ SCRAPER_API_KEY = "1967f7d39ff9d57ff2bcc1f3ed097fb7"
 
 PROFILES = ["chrome", "chrome131", "chrome124", "chrome120", "safari17_0", "edge101"]
 cache = {}
-CACHE_SURE = 300
+CACHE_SURE = 600
 
 YARDIM = {"hata": "Adres bulunamadı", "dogru_kullanim": ["/fund?code=TLY", "/debug?code=TLY"]}
 
