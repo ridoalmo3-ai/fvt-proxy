@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 # ▼▼ ScraperAPI anahtarını tırnakların arasına yapıştır (yoksa boş bırak) ▼▼
-SCRAPER_API_KEY = ""
+SCRAPER_API_KEY = "1967f7d39ff9d57ff2bcc1f3ed097fb7"
 # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 PROFILES = ["chrome", "chrome131", "chrome124", "chrome120", "safari17_0", "edge101"]
